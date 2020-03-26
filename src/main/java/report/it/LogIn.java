@@ -1,16 +1,12 @@
 package report.it;
 
-import org.checkerframework.checker.units.qual.A;
-
 import java.io.*;
 
 import java.io.IOException;
-import java.security.NoSuchAlgorithmException;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.Date;
 
 import javax.servlet.ServletException;
 import javax.servlet.annotation.WebServlet;
@@ -28,19 +24,19 @@ import javax.servlet.http.HttpServletResponse;
  * Then the user is asked for name and password.
  * If the user is logged in he/she is directed to the functionality page.
  *
- * @author Aml Abbas & Fredrik Peterson
- * @version 0.3
+ * @author Martin Host
+ * @version 1.0
  */
 @WebServlet("/LogIn")
 public class LogIn extends ServletBase {
     private static final long serialVersionUID = 1L;
-    private static int attempts = 0;
 
     /**
      * @see HttpServlet#HttpServlet()
      */
     public LogIn() {
         super();
+        // TODO Auto-generated constructor stub
     }
 
     /**
@@ -67,58 +63,32 @@ public class LogIn extends ServletBase {
             out.println("<p>You are now logged out</p>");
         }
 
-        String username;
+        String name;
         String password;
 
-        username = request.getParameter("user"); // get the string that the user entered in the form
+        name = request.getParameter("user"); // get the string that the user entered in the form
         password = request.getParameter("password"); // get the entered password
-
-        if (username != null && password != null) {
-            if (getLoginAttempts(username) > 2) {
-                setLogInAttemptsDate(username);
-                out.println("<p>you are locked for 10 minutes. </p>");
-                request.getRequestDispatcher("index.jsp").include(request, response);
-
-            } else {
-                if (!checkUser(username).equals("")) {
-                    long unixTimeLogIn =  System.currentTimeMillis() / 1000;
-                    if (unixTimeLogIn< getLogInAttemptDate(username)){
-                        out.println("<p>you are locked for 10 minutes. </p>");
-                        request.getRequestDispatcher("index.jsp").include(request, response);
-
-                    }
-                    if (unixTimeLogIn> getLogInAttemptDate(username)) {
-                        if (checkUser(username).equals(encryptPassword(password))) {
-                            state = LOGIN_TRUE;
-                            session.setAttribute("state", state);  // save the state in the session
-                            session.setAttribute("username", username);  // save the username in the session
-                            if (username.equals("admin")) {
-                                response.sendRedirect("Administration");
-                            } else {
-                                response.sendRedirect("TimeReporting");
-                            }
-                            attempts = 0;
-                        } else {
-                            attempts++;
-                            out.println("<p>You tried: " + attempts + "That was not a valid password. </p>");
-                            request.getRequestDispatcher("index.jsp").include(request, response);
-                        }
-                    }
-
-                } else {
-                    out.println("<p>That was not a valid username </p>");
-                    request.getRequestDispatcher("index.jsp").include(request, response);
-                }
-                setAttempts(username);
+        if (name != null && password != null) {
+            if (checkUser(name, password)) {
+                state = LOGIN_TRUE;
+                session.setAttribute("state", state);  // save the state in the session
+                session.setAttribute("name", name);  // save the name in the session
+                response.sendRedirect("TimeReporting");
+            } else if (checkAdmin(name, password)) {
+				state = LOGIN_TRUE;
+				session.setAttribute("state", state);  // save the state in the session
+				session.setAttribute("name", name);  // save the name in the session
+				response.sendRedirect("Administration");
+			} else {
+                out.println("<p>That was not a valid user name / password. </p>");
+                out.println(loginRequestForm());
             }
-        } else { // username was null, probably because no form has been filled out yet. Display form.
-//            out.println(loginRequestForm());
-            request.getRequestDispatcher("index.jsp").include(request, response);
+        } else { // name was null, probably because no form has been filled out yet. Display form.
+            out.println(loginRequestForm());
         }
 
         out.println("</body></html>");
     }
-
 
     /**
      * All requests are forwarded to the doGet method.
@@ -129,136 +99,83 @@ public class LogIn extends ServletBase {
         doGet(request, response);
     }
 
-    /**
-     * Checks with the database if the user should be accepted
-     *
-     * @param name The name of the user
-     * @return true if the user should be accepted
-     */
-    private String checkUser(String name) {
+	/**
+	 * Generates a form for login.
+	 *
+	 * @return HTML code for the form
+	 */
+	protected String loginRequestForm() {
+		String html = "<p>Please enter your name and password in order to log in:</p>";
+		html += "<p> <form name=" + formElement("input");
+		html += " method=" + formElement("post");
+		html += "<p> Name: <input type=" + formElement("text") + " name=" + formElement("user") + '>';
+		html += "<p> Password: <input type=" + formElement("password") + " name=" + formElement("password") + '>';
+		html += "<p> <input type=" + formElement("submit") + "value=" + formElement("Submit") + '>';
+		return html;
+	}
 
-        boolean userOk = false;
-        boolean userChecked = false;
-        String Password = "";
+	/**
+	 * Checks with the database if the user should be accepted
+	 *
+	 * @param name     The name of the user
+	 * @param password The password of the user
+	 * @return true if the user should be accepted
+	 */
+	private boolean checkUser(String name, String password) {
 
-        try {
-            PreparedStatement preparedStatement = connection.prepareStatement("select * from Users where username = ?");
-            preparedStatement.setString(1, name);
-            ResultSet rs = preparedStatement.executeQuery();
+		boolean userOk = false;
+		boolean userChecked = false;
 
-            while (rs.next() && !userChecked) {
-                String nameSaved = rs.getString("username");
-                Password = rs.getString("password");
-                if (name.equals(nameSaved)) {
-                    userChecked = true;
-                    return Password;
-                }
-            }
-            preparedStatement.close();
-        } catch (SQLException ex) {
-            System.out.println("SQLException: " + ex.getMessage());
-            System.out.println("SQLState: " + ex.getSQLState());
-            System.out.println("VendorError: " + ex.getErrorCode());
-        }
-        return "";
-    }
+		try {
+			Statement stmt = connection.createStatement();
+			ResultSet rs = stmt.executeQuery("select * from Users");
+			while (rs.next() && !userChecked) {
+				String nameSaved = rs.getString("username");
+				String passwordSaved = rs.getString("password");
+				if (name.equals(nameSaved)) {
+					userChecked = true;
+					userOk = password.equals(passwordSaved);
+				}
+			}
+			stmt.close();
+		} catch (SQLException ex) {
+			System.out.println("SQLException: " + ex.getMessage());
+			System.out.println("SQLState: " + ex.getSQLState());
+			System.out.println("VendorError: " + ex.getErrorCode());
+		}
+		return userOk;
+	}
 
-    private int getLoginAttempts(String username) {
+	private boolean checkAdmin(String username, String password) {
+		boolean usernameExists = false;
+		boolean passCorrect = false;
 
-        try {
-            String sql = "select attempts from userAttempts where username='" + username + "'";
-            PreparedStatement stm = connection.prepareStatement(sql);
-            ResultSet rs = stm.executeQuery();
-            while (rs.next()) {
-                attempts = rs.getInt("attempts");
-            }
-        } catch (SQLException ex) {
-            System.out.println("SQLException: " + ex.getMessage());
-            System.out.println("SQLState: " + ex.getSQLState());
-            System.out.println("VendorError: " + ex.getErrorCode());
-        }
-        return attempts;
-    }
+		try {
+			PreparedStatement preparedStatement = connection.prepareStatement("select * from Administrators where username = ?");
+			preparedStatement.setString(1, username);
+			ResultSet set = preparedStatement.executeQuery();
+			while (set.next() && !usernameExists) {
+				if (username.equals(set.getString("username"))) {
+					usernameExists = true;
+					passCorrect = set.getString("password").equals(password);
+				}
+			}
+			preparedStatement.close();
 
-    private void setAttempts(String username) {
-        try {
-            String sql = "select username from userAttempts";
-            PreparedStatement stm = connection.prepareStatement(sql);
-            ResultSet rs = stm.executeQuery();
-            while (rs.next()) {
-                if (rs.getString("username").equals(username)) {
-                    updateAttempts(username);
-                    return;
-                }
-            }
-            sql = "insert into userAttempts (username, attempts) values('" + username + "','" + attempts + "')";
-            stm = connection.prepareStatement(sql);
-            stm.executeUpdate();
+		} catch (SQLException ex) {
+			System.out.println("SQLException: " + ex.getMessage());
+			System.out.println("SQLState: " + ex.getSQLState());
+			System.out.println("VendorError: " + ex.getErrorCode());
+		}
 
-        } catch (SQLException ex) {
-            System.out.println("SQLException: " + ex.getMessage());
-            System.out.println("SQLState: " + ex.getSQLState());
-            System.out.println("VendorError: " + ex.getErrorCode());
-        }
-    }
+		return passCorrect;
+	}
 
-    private void updateAttempts(String username) {
-        try {
 
-            String sql = "update userAttempts set attempts='" + attempts + "' where username='" + username + "'";
-            PreparedStatement stm = connection.prepareStatement(sql);
-            stm.executeUpdate();
-        } catch (SQLException ex) {
-            System.out.println("SQLException: " + ex.getMessage());
-            System.out.println("SQLState: " + ex.getSQLState());
-            System.out.println("VendorError: " + ex.getErrorCode());
-        }
-    }
+	private int checkLoginAttempts() {
+		int fails = 0;
 
-    private void setLogInAttemptsDate(String username) {
-        resetAttempts(username);
-        try {
-            long unixTime = System.currentTimeMillis() / 1000;
-            unixTime =unixTime+ 600;
+		return fails;
+	}
 
-            String sql = "update userAttempts set lastModified = '" + unixTime + "' where username='" + username + "'";
-            PreparedStatement stm = connection.prepareStatement(sql);
-            stm.executeUpdate();
-
-        } catch (SQLException ex) {
-            System.out.println("SQLException: " + ex.getMessage());
-            System.out.println("SQLState: " + ex.getSQLState());
-            System.out.println("VendorError: " + ex.getErrorCode());
-        }
-    }
-
-    private void resetAttempts(String username) {
-        try {
-
-            String sql = "update userAttempts set attempts=" + 0 + " where username='" + username + "'";
-            PreparedStatement stm = connection.prepareStatement(sql);
-            stm.executeUpdate();
-
-        } catch (SQLException ex) {
-            System.out.println("SQLException: " + ex.getMessage());
-            System.out.println("SQLState: " + ex.getSQLState());
-            System.out.println("VendorError: " + ex.getErrorCode());
-        }
-    }
-
-    private long getLogInAttemptDate(String username) {
-        try {
-            String sql = "select lastModified from userAttempts where username ='" + username + "'";
-            PreparedStatement stm = connection.prepareStatement(sql);
-            ResultSet rs = stm.executeQuery();
-            while (rs.next()) {
-                return rs.getLong("lastModified");
-            }
-        } catch (SQLException ex) {
-            System.out.println("SQLException: " + ex.getMessage());
-            System.out.println("SQLState: " + ex.getSQLState());
-            System.out.println("VendorError: " + ex.getErrorCode());
-        }
-        return -1;
-    }
 }
